@@ -92,3 +92,21 @@ n8n Workflow Steps:
         d. Send a message to a chat platform (e.g., Slack, Discord nodes).
 
 This setup provides a robust and scalable question-answering system using LangChain, Pinecone, and FastAPI, ready for integration with tools like n8n.
+
+
+KEY FEATURES:
+
+1. Intelligent Q&A: Answers user queries based on a custom knowledge base (demonstrated with the jamescalam/ai-arxiv-chunked dataset).
+2. LangChain Framework: Utilizes LangChain for building the RAG pipeline, including document loading, chunking, embedding, retrieval, and conversational AI.
+3. Pinecone Vector Database: Stores and retrieves document embeddings for fast and scalable semantic search.
+4. OpenAI Integration: Employs OpenAI's embedding models for vector creation and gpt-4o-mini (or similar) for generating concise and relevant answers.
+5. Voice Input: A responsive web frontend (index.html) integrates the Web Speech API, enabling users to speak their questions directly. The spoken input is transcribed to text and then processed by the backend.
+6. FastAPI Backend: A lightweight and high-performance API (main.py) exposes the QA functionality, making it easy to integrate with other applications.
+7. n8n Integration Ready: Designed for seamless connection with automation platforms like n8n via standard HTTP requests, allowing for advanced workflow orchestration (e.g., triggering emails, logging, or database updates based on Q&A interactions).
+
+PROJECT STRUCTURE:
+
+1. ingest.py: Script for data preprocessing, chunking, embedding, and uploading to Pinecone.
+2. main.py: FastAPI application serving the conversational QA endpoint.
+3. index.html: Frontend web page for voice and text input, displaying answers and source documents.
+4. requirements.txt: Python dependencies.
