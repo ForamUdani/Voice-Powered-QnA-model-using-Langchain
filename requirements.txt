@@ -1,0 +1,11 @@
+# requirements.txt
+langchain
+langchain-community
+langchain-openai
+langchain-pinecone
+pinecone-client
+fastapi
+uvicorn[standard]
+python-dotenv
+datasets
+pandas
