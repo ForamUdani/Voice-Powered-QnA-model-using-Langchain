@@ -41,7 +41,7 @@ Then I have created a simple web interface (index.html) that uses the browser's 
 
 4. index.html (Web Interface with Speech Input)
 This HTML file provides a user interface with a microphone button, a text area to display the transcribed query, and an area to show the model's answer.
-It also includes the Text-to-Speech (TTS). As the user speaks the query, the bot will speak the response along with the response display.
+It also includes the Text-to-Speech (TTS) functionality. As the user speaks the query, the bot will speak the response along with the response display.
 
 How to Use:
 
