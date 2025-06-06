@@ -37,6 +37,13 @@
         .mic-button.recording:hover {
             background-color: #dc2626; /* Darker red on hover when recording */
         }
+        .mic-button.speaking {
+            background-color: #10b981; /* Green when AI is speaking */
+        }
+        .mic-button.speaking:hover {
+            background-color: #059669; /* Darker green on hover when speaking */
+        }
+
         @keyframes pulse {
             0% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.7); }
             70% { box-shadow: 0 0 0 10px rgba(99, 102, 241, 0); }
@@ -103,6 +110,11 @@
             <div class="loading-spinner"></div>
             <span>Thinking...</span>
         </div>
+         <!-- Speaking Indicator -->
+        <div id="speaking-indicator" class="hidden flex items-center justify-center space-x-2 text-green-600">
+            <i class="fas fa-volume-up text-xl"></i>
+            <span>AI is speaking...</span>
+        </div>
 
         <!-- Source Documents Display -->
         <div id="source-documents" class="hidden mt-4 p-4 bg-gray-100 rounded-lg border border-gray-200">
@@ -118,6 +130,7 @@
         const queryInput = document.getElementById('query-input');
         const micButton = document.getElementById('mic-button');
         const loadingIndicator = document.getElementById('loading-indicator');
+        const speakingIndicator = document.getElementById('speaking-indicator'); // New indicator for TTS
         const chatHistoryDiv = document.getElementById('chat-history');
         const sourceDocumentsDiv = document.getElementById('source-documents');
         const sourceList = document.getElementById('source-list');
@@ -125,6 +138,26 @@
         let recognition; // SpeechRecognition object
         let isRecording = false;
         let chatHistory = []; // Stores conversation history for the backend: List of [human_message, ai_message] tuples
+        let synth = window.speechSynthesis; // SpeechSynthesis object
+        let voices = []; // Array to store available voices
+
+        // Function to populate voices
+        function populateVoices() {
+            voices = synth.getVoices();
+            // Optional: You can choose a specific voice here.
+            // For example, to pick a male voice:
+            // let preferredVoice = voices.find(voice => voice.name.includes('Google US English') && !voice.name.includes('Female'));
+            // If preferredVoice exists, set it on the utterance.
+            console.log("Available voices:", voices.map(v => v.name));
+        }
+
+        // Populate voices when they are loaded (async)
+        if (synth.onvoiceschanged !== undefined) {
+            synth.onvoiceschanged = populateVoices;
+        } else {
+            populateVoices(); // Fallback for browsers that don't fire onvoiceschanged immediately
+        }
+
 
         // Check for Web Speech API compatibility
         if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -144,9 +177,11 @@
             recognition.onstart = () => {
                 isRecording = true;
                 micButton.classList.add('recording');
+                micButton.classList.remove('speaking'); // Ensure speaking indicator is off
                 micButton.innerHTML = '<i class="fas fa-microphone-slash text-2xl"></i>';
                 micButton.title = "Stop speaking";
                 queryInput.placeholder = "Listening...";
+                hideSpeaking(); // Hide speaking indicator if it was active
                 console.log('Speech recognition started');
             };
 
@@ -173,7 +208,7 @@
             recognition.onerror = (event) => {
                 console.error('Speech recognition error:', event.error);
                 if (event.error === 'no-speech') {
-                    alert('No speech detected. Please try again.');
+                    // alert('No speech detected. Please try again.'); // Keep alert for initial debugging, can be removed later
                 } else if (event.error === 'not-allowed') {
                     alert('Microphone access denied. Please allow microphone access in your browser settings.');
                 } else {
@@ -191,8 +226,13 @@
             micButton.addEventListener('click', () => {
                 if (isRecording) {
                     recognition.stop();
-                } else {
-                    queryInput.value = ''; // Clear previous query
+                } else if (synth.speaking) {
+                    // If AI is speaking, stop it and then start listening
+                    synth.cancel();
+                    hideSpeaking();
+                    recognition.start();
+                }
+                else {
                     recognition.start();
                 }
             });
@@ -210,6 +250,21 @@
             loadingIndicator.classList.remove('flex');
         }
 
+        // Function to display speaking indicator
+        function showSpeaking() {
+            speakingIndicator.classList.remove('hidden');
+            speakingIndicator.classList.add('flex');
+            micButton.classList.add('speaking'); // Change mic button color when speaking
+        }
+
+        // Function to hide speaking indicator
+        function hideSpeaking() {
+            speakingIndicator.classList.add('hidden');
+            speakingIndicator.classList.remove('flex');
+            micButton.classList.remove('speaking'); // Reset mic button color
+        }
+
+
         // Function to add a message to the chat history display
         function addMessageToChat(text, sender) {
             const messageDiv = document.createElement('div');
@@ -218,6 +273,47 @@
             chatHistoryDiv.appendChild(messageDiv);
             chatHistoryDiv.scrollTop = chatHistoryDiv.scrollHeight; // Scroll to bottom
         }
+
+        // Function to speak the AI's response
+        function speakResponse(text) {
+            if (synth.speaking) {
+                synth.cancel(); // Stop any ongoing speech
+            }
+
+            if ('SpeechSynthesisUtterance' in window) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'en-US'; // Set language
+
+                // Optional: Select a specific voice if available
+                // For example, to find a voice that sounds good:
+                const preferredVoice = voices.find(voice => voice.name.includes('Google US English') && !voice.name.includes('Female'));
+                if (preferredVoice) {
+                    utterance.voice = preferredVoice;
+                } else if (voices.length > 0) {
+                    utterance.voice = voices[0]; // Fallback to first available voice
+                }
+
+                utterance.onstart = () => {
+                    showSpeaking();
+                    micButton.disabled = true; // Disable mic button while AI is speaking to prevent interruptions
+                };
+                utterance.onend = () => {
+                    hideSpeaking();
+                    micButton.disabled = false; // Re-enable mic button after AI finishes speaking
+                };
+                utterance.onerror = (event) => {
+                    console.error('Speech synthesis error:', event.error);
+                    hideSpeaking();
+                    micButton.disabled = false; // Re-enable mic button on error
+                    alert('An error occurred during speech synthesis: ' + event.error);
+                };
+
+                synth.speak(utterance);
+            } else {
+                console.warn('SpeechSynthesisUtterance not supported in this browser. AI will not speak.');
+            }
+        }
+
 
         // Function to send query to the backend
         async function sendQuery(query) {
@@ -252,6 +348,9 @@
                 addMessageToChat(data.answer, 'ai');
                 chatHistory.push([query, data.answer]); // Update chat history for next turn
 
+                // --- NEW: Speak the AI's answer ---
+                speakResponse(data.answer);
+
                 // Display source documents if available
                 if (data.source_documents && data.source_documents.length > 0) {
                     sourceDocumentsDiv.classList.remove('hidden');
@@ -280,8 +379,10 @@
             }
         });
 
-        // Initial welcome message
-        addMessageToChat("Hello! Ask me anything about AI academic papers.", 'ai');
+        // Initial welcome message and speak it
+        const welcomeMessage = "Hello! Ask me anything about AI academic papers.";
+        addMessageToChat(welcomeMessage, 'ai');
+        speakResponse(welcomeMessage);
 
     </script>
 </body>
