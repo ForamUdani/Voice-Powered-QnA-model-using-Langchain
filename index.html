@@ -21,13 +21,13 @@
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             padding: 2rem;
         }
-        .mic-button {
+        .mic-button, .send-button {
             transition: background-color 0.3s ease, transform 0.1s ease;
         }
-        .mic-button:hover {
+        .mic-button:hover, .send-button:hover {
             background-color: #4f46e5; /* Darker indigo on hover */
         }
-        .mic-button:active {
+        .mic-button:active, .send-button:active {
             transform: scale(0.98);
         }
         .mic-button.recording {
@@ -88,13 +88,13 @@
             <!-- Chat messages will be appended here -->
         </div>
 
-        <!-- Query Input and Microphone Button -->
+        <!-- Query Input, Microphone Button, and Send Button -->
         <div class="flex items-center space-x-4">
             <textarea
                 id="query-input"
                 class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none resize-none"
                 rows="3"
-                placeholder="Type your question or speak it..."
+                placeholder="Type your question or press the mic to speak..."
             ></textarea>
             <button
                 id="mic-button"
@@ -103,12 +103,24 @@
             >
                 <i class="fas fa-microphone text-2xl"></i>
             </button>
+            <button
+                id="send-button"
+                class="send-button bg-indigo-600 text-white p-4 rounded-full shadow-lg flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                title="Send query"
+            >
+                <i class="fas fa-paper-plane text-2xl"></i>
+            </button>
         </div>
 
-        <!-- Loading Indicator -->
+        <!-- Status Indicators -->
+        <div id="status-display" class="text-center text-gray-600 font-medium">
+            <!-- Dynamic status messages like "Listening...", "Processing...", etc. -->
+        </div>
+
+        <!-- Loading Indicator (for processing/thinking) -->
         <div id="loading-indicator" class="hidden flex items-center justify-center space-x-2 text-indigo-600">
             <div class="loading-spinner"></div>
-            <span>Thinking...</span>
+            <span>Processing query...</span>
         </div>
          <!-- Speaking Indicator -->
         <div id="speaking-indicator" class="hidden flex items-center justify-center space-x-2 text-green-600">
@@ -129,8 +141,10 @@
         // Get references to DOM elements
         const queryInput = document.getElementById('query-input');
         const micButton = document.getElementById('mic-button');
+        const sendButton = document.getElementById('send-button'); // New send button
+        const statusDisplay = document.getElementById('status-display'); // New status display
         const loadingIndicator = document.getElementById('loading-indicator');
-        const speakingIndicator = document.getElementById('speaking-indicator'); // New indicator for TTS
+        const speakingIndicator = document.getElementById('speaking-indicator');
         const chatHistoryDiv = document.getElementById('chat-history');
         const sourceDocumentsDiv = document.getElementById('source-documents');
         const sourceList = document.getElementById('source-list');
@@ -144,10 +158,6 @@
         // Function to populate voices
         function populateVoices() {
             voices = synth.getVoices();
-            // Optional: You can choose a specific voice here.
-            // For example, to pick a male voice:
-            // let preferredVoice = voices.find(voice => voice.name.includes('Google US English') && !voice.name.includes('Female'));
-            // If preferredVoice exists, set it on the utterance.
             console.log("Available voices:", voices.map(v => v.name));
         }
 
@@ -158,6 +168,40 @@
             populateVoices(); // Fallback for browsers that don't fire onvoiceschanged immediately
         }
 
+        // --- UI Feedback Functions ---
+        function setStatus(message) {
+            statusDisplay.textContent = message;
+        }
+
+        function showLoading() {
+            loadingIndicator.classList.remove('hidden');
+            loadingIndicator.classList.add('flex');
+            setStatus('Processing query...'); // Update status display
+        }
+
+        function hideLoading() {
+            loadingIndicator.classList.add('hidden');
+            loadingIndicator.classList.remove('flex');
+            setStatus(''); // Clear status when not loading
+        }
+
+        function showSpeaking() {
+            speakingIndicator.classList.remove('hidden');
+            speakingIndicator.classList.add('flex');
+            micButton.classList.add('speaking');
+            sendButton.disabled = true; // Disable send button while AI is speaking
+            setStatus('AI is speaking...'); // Update status display
+        }
+
+        function hideSpeaking() {
+            speakingIndicator.classList.add('hidden');
+            speakingIndicator.classList.remove('flex');
+            micButton.classList.remove('speaking');
+            sendButton.disabled = false; // Re-enable send button
+            setStatus(''); // Clear status when not speaking
+        }
+        // --- End UI Feedback Functions ---
+
 
         // Check for Web Speech API compatibility
         if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -165,23 +209,26 @@
             micButton.title = "Speech recognition not supported in this browser.";
             micButton.classList.add('opacity-50', 'cursor-not-allowed');
             alert("Speech recognition is not supported in your browser. Please use Google Chrome for this feature.");
+            sendButton.disabled = false; // Ensure send button is still active for typing
         } else {
             // Initialize SpeechRecognition
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             recognition = new SpeechRecognition();
-            recognition.continuous = false; // Listen for a single utterance
-            recognition.interimResults = false; // Only return final results
-            recognition.lang = 'en-US'; // Set language
+            recognition.continuous = true; // Set to true for interim results
+            recognition.interimResults = true; // Get interim results
+            recognition.lang = 'en-US';
 
             // Event handler for when speech recognition starts
             recognition.onstart = () => {
                 isRecording = true;
                 micButton.classList.add('recording');
-                micButton.classList.remove('speaking'); // Ensure speaking indicator is off
+                micButton.classList.remove('speaking');
                 micButton.innerHTML = '<i class="fas fa-microphone-slash text-2xl"></i>';
                 micButton.title = "Stop speaking";
                 queryInput.placeholder = "Listening...";
+                sendButton.disabled = true; // Disable send button while listening
                 hideSpeaking(); // Hide speaking indicator if it was active
+                setStatus('Listening...');
                 console.log('Speech recognition started');
             };
 
@@ -191,34 +238,48 @@
                 micButton.classList.remove('recording');
                 micButton.innerHTML = '<i class="fas fa-microphone text-2xl"></i>';
                 micButton.title = "Start speaking";
-                queryInput.placeholder = "Type your question or speak it...";
+                queryInput.placeholder = "Type your question or press the mic to speak...";
+                sendButton.disabled = false; // Re-enable send button after listening
+                setStatus(''); // Clear listening status
                 console.log('Speech recognition ended');
             };
 
             // Event handler for when a speech recognition result is available
             recognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript;
-                queryInput.value = transcript; // Display the transcribed text
-                console.log('Transcript:', transcript);
-                // Automatically send the query after transcription
-                sendQuery(transcript);
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = 0; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+                // Display both final and interim results
+                queryInput.value = finalTranscript + interimTranscript;
+                console.log('Interim:', interimTranscript, 'Final:', finalTranscript);
+                // IMPORTANT: The query is NO LONGER sent automatically here.
+                // User must click "Send" or press Enter.
             };
 
             // Event handler for speech recognition errors
             recognition.onerror = (event) => {
                 console.error('Speech recognition error:', event.error);
                 if (event.error === 'no-speech') {
-                    // alert('No speech detected. Please try again.'); // Keep alert for initial debugging, can be removed later
+                    setStatus('No speech detected. Please try again.');
                 } else if (event.error === 'not-allowed') {
                     alert('Microphone access denied. Please allow microphone access in your browser settings.');
+                    setStatus('Microphone access denied.');
                 } else {
-                    alert('An error occurred during speech recognition: ' + event.error);
+                    setStatus('Speech recognition error: ' + event.error);
                 }
-                isRecording = false; // Reset state on error
+                isRecording = false;
                 micButton.classList.remove('recording');
                 micButton.innerHTML = '<i class="fas fa-microphone text-2xl"></i>';
                 micButton.title = "Start speaking";
-                queryInput.placeholder = "Type your question or speak it...";
+                queryInput.placeholder = "Type your question or press the mic to speak...";
+                sendButton.disabled = false; // Re-enable send button on error
                 hideLoading();
             };
 
@@ -227,51 +288,15 @@
                 if (isRecording) {
                     recognition.stop();
                 } else if (synth.speaking) {
-                    // If AI is speaking, stop it and then start listening
+                    // If AI is speaking, stop it first, then start listening
                     synth.cancel();
                     hideSpeaking();
                     recognition.start();
-                }
-                else {
+                } else {
+                    queryInput.value = ''; // Clear previous query before listening
                     recognition.start();
                 }
             });
-        }
-
-        // Function to display loading indicator
-        function showLoading() {
-            loadingIndicator.classList.remove('hidden');
-            loadingIndicator.classList.add('flex');
-        }
-
-        // Function to hide loading indicator
-        function hideLoading() {
-            loadingIndicator.classList.add('hidden');
-            loadingIndicator.classList.remove('flex');
-        }
-
-        // Function to display speaking indicator
-        function showSpeaking() {
-            speakingIndicator.classList.remove('hidden');
-            speakingIndicator.classList.add('flex');
-            micButton.classList.add('speaking'); // Change mic button color when speaking
-        }
-
-        // Function to hide speaking indicator
-        function hideSpeaking() {
-            speakingIndicator.classList.add('hidden');
-            speakingIndicator.classList.remove('flex');
-            micButton.classList.remove('speaking'); // Reset mic button color
-        }
-
-
-        // Function to add a message to the chat history display
-        function addMessageToChat(text, sender) {
-            const messageDiv = document.createElement('div');
-            messageDiv.classList.add('chat-message', sender === 'user' ? 'user-message' : 'ai-message');
-            messageDiv.textContent = text;
-            chatHistoryDiv.appendChild(messageDiv);
-            chatHistoryDiv.scrollTop = chatHistoryDiv.scrollHeight; // Scroll to bottom
         }
 
         // Function to speak the AI's response
@@ -282,20 +307,18 @@
 
             if ('SpeechSynthesisUtterance' in window) {
                 const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = 'en-US'; // Set language
+                utterance.lang = 'en-US';
 
-                // Optional: Select a specific voice if available
-                // For example, to find a voice that sounds good:
                 const preferredVoice = voices.find(voice => voice.name.includes('Google US English') && !voice.name.includes('Female'));
                 if (preferredVoice) {
                     utterance.voice = preferredVoice;
                 } else if (voices.length > 0) {
-                    utterance.voice = voices[0]; // Fallback to first available voice
+                    utterance.voice = voices[0];
                 }
 
                 utterance.onstart = () => {
                     showSpeaking();
-                    micButton.disabled = true; // Disable mic button while AI is speaking to prevent interruptions
+                    micButton.disabled = true; // Disable mic button while AI is speaking
                 };
                 utterance.onend = () => {
                     hideSpeaking();
@@ -304,13 +327,14 @@
                 utterance.onerror = (event) => {
                     console.error('Speech synthesis error:', event.error);
                     hideSpeaking();
-                    micButton.disabled = false; // Re-enable mic button on error
-                    alert('An error occurred during speech synthesis: ' + event.error);
+                    micButton.disabled = false;
+                    setStatus('Speech synthesis error.');
                 };
 
                 synth.speak(utterance);
             } else {
                 console.warn('SpeechSynthesisUtterance not supported in this browser. AI will not speak.');
+                setStatus('Text-to-speech not supported.');
             }
         }
 
@@ -318,12 +342,21 @@
         // Function to send query to the backend
         async function sendQuery(query) {
             if (!query.trim()) {
-                alert("Please enter or speak a question.");
+                setStatus("Please enter or speak a question.");
                 return;
             }
 
+            // Stop any ongoing speech before sending new query
+            if (synth.speaking) {
+                synth.cancel();
+                hideSpeaking();
+            }
+            if (isRecording) { // Stop recording if user hits send while speaking
+                recognition.stop();
+            }
+
             addMessageToChat(query, 'user');
-            showLoading();
+            showLoading(); // Show "Processing query..."
             sourceDocumentsDiv.classList.add('hidden'); // Hide previous sources
             sourceList.innerHTML = ''; // Clear previous sources
 
@@ -335,7 +368,7 @@
                     },
                     body: JSON.stringify({
                         query: query,
-                        chat_history: chatHistory // Send current chat history
+                        chat_history: chatHistory
                     }),
                 });
 
@@ -346,9 +379,8 @@
 
                 const data = await response.json();
                 addMessageToChat(data.answer, 'ai');
-                chatHistory.push([query, data.answer]); // Update chat history for next turn
+                chatHistory.push([query, data.answer]);
 
-                // --- NEW: Speak the AI's answer ---
                 speakResponse(data.answer);
 
                 // Display source documents if available
@@ -356,8 +388,10 @@
                     sourceDocumentsDiv.classList.remove('hidden');
                     data.source_documents.forEach(doc => {
                         const listItem = document.createElement('li');
-                        listItem.innerHTML = `<strong>Title:</strong> ${doc.metadata.title || 'N/A'}<br>
-                                            <strong>Chunk:</strong> ${doc.page_content.substring(0, 200)}...`; // Show first 200 chars
+                        // Ensure 'metadata' and 'title' exist before accessing
+                        const title = doc.metadata && doc.metadata.title ? doc.metadata.title : 'N/A';
+                        listItem.innerHTML = `<strong>Title:</strong> ${title}<br>
+                                            <strong>Chunk:</strong> ${doc.page_content.substring(0, 200)}...`;
                         sourceList.appendChild(listItem);
                     });
                 }
@@ -365,19 +399,28 @@
             } catch (error) {
                 console.error('Error sending query:', error);
                 addMessageToChat(`Error: ${error.message}`, 'ai');
+                setStatus(`Error: ${error.message}`);
             } finally {
                 hideLoading();
                 queryInput.value = ''; // Clear input after sending
             }
         }
 
-        // Allow sending query by pressing Enter in the text area
+        // --- Event Listeners for sending query ---
+        // New: Send button click
+        sendButton.addEventListener('click', () => {
+            sendQuery(queryInput.value);
+        });
+
+        // Existing: Allow sending query by pressing Enter in the text area
         queryInput.addEventListener('keypress', (event) => {
             if (event.key === 'Enter' && !event.shiftKey) { // Shift+Enter for new line
                 event.preventDefault(); // Prevent default Enter behavior (new line)
                 sendQuery(queryInput.value);
             }
         });
+        // --- End Event Listeners ---
+
 
         // Initial welcome message and speak it
         const welcomeMessage = "Hello! Ask me anything about AI academic papers.";
