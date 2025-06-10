@@ -83,6 +83,11 @@
     <div class="container flex flex-col space-y-6">
         <h1 class="text-3xl font-bold text-center text-indigo-700 mb-6">Voice-Powered QA Chatbot</h1>
 
+        <!-- Session ID Display (for debugging/info) -->
+        <div class="text-sm text-gray-500 text-center">
+            Session ID: <span id="session-id-display">Loading...</span>
+        </div>
+
         <!-- Filters Section -->
         <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
             <h2 class="text-xl font-semibold text-gray-800 mb-3">Filters (Optional)</h2>
@@ -163,17 +168,19 @@
         const chatHistoryDiv = document.getElementById('chat-history');
         const sourceDocumentsDiv = document.getElementById('source-documents');
         const sourceList = document.getElementById('source-list');
+        const sessionIdDisplay = document.getElementById('session-id-display'); // New element for session ID
 
         // Filter input elements
         const filterAuthorInput = document.getElementById('filter-author');
         const filterYearInput = document.getElementById('filter-year');
 
-
         let recognition;
         let isRecording = false;
-        let chatHistory = [];
+        let chatHistory = []; // Now represents the full history from the backend
         let synth = window.speechSynthesis;
         let voices = [];
+        let currentSessionId = null; // Store the current session ID
+
 
         function populateVoices() {
             voices = synth.getVoices();
@@ -208,7 +215,7 @@
             speakingIndicator.classList.add('flex');
             micButton.classList.add('speaking');
             sendButton.disabled = true;
-            queryInput.disabled = true; // Disable input while AI is speaking
+            queryInput.disabled = true;
             setStatus('AI is speaking...');
         }
 
@@ -217,7 +224,7 @@
             speakingIndicator.classList.remove('flex');
             micButton.classList.remove('speaking');
             sendButton.disabled = false;
-            queryInput.disabled = false; // Enable input
+            queryInput.disabled = false;
             setStatus('');
         }
         // --- End UI Feedback Functions ---
@@ -245,7 +252,7 @@
                 micButton.title = "Stop speaking";
                 queryInput.placeholder = "Listening...";
                 sendButton.disabled = true;
-                queryInput.disabled = true; // Disable input while listening
+                queryInput.disabled = true;
                 hideSpeaking();
                 setStatus('Listening...');
                 console.log('Speech recognition started');
@@ -258,7 +265,7 @@
                 micButton.title = "Start speaking";
                 queryInput.placeholder = "Type your question or press the mic to speak...";
                 sendButton.disabled = false;
-                queryInput.disabled = false; // Enable input
+                queryInput.disabled = false;
                 setStatus('');
                 console.log('Speech recognition ended');
             };
@@ -350,6 +357,14 @@
             }
         }
 
+        function addMessageToChat(text, sender) {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('chat-message', sender === 'user' ? 'user-message' : 'ai-message');
+            messageDiv.textContent = text;
+            chatHistoryDiv.appendChild(messageDiv);
+            chatHistoryDiv.scrollTop = chatHistoryDiv.scrollHeight;
+        }
+
         async function sendQuery(query) {
             if (!query.trim()) {
                 setStatus("Please enter or speak a question.");
@@ -361,7 +376,7 @@
                 hideSpeaking();
             }
             if (isRecording) {
-                recognition.stop(); // Stop recording if user hits send while speaking
+                recognition.stop();
             }
 
             addMessageToChat(query, 'user');
@@ -369,7 +384,6 @@
             sourceDocumentsDiv.classList.add('hidden');
             sourceList.innerHTML = '';
 
-            // --- Collect Filters ---
             const filters = {};
             const author = filterAuthorInput.value.trim();
             const year = filterYearInput.value.trim();
@@ -380,7 +394,7 @@
             if (year) {
                 filters.publication_year = year;
             }
-            console.log("Sending query with filters:", filters);
+            console.log("Sending query with filters:", filters, "Session ID:", currentSessionId);
 
             try {
                 const response = await fetch('http://127.0.0.1:8000/ask', {
@@ -389,9 +403,10 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
+                        session_id: currentSessionId, // Send the current session ID
                         query: query,
-                        chat_history: chatHistory,
-                        filters: Object.keys(filters).length > 0 ? filters : null // Send null if no filters
+                        chat_history: chatHistory, // Still sending the current chatHistory, backend will merge with Firestore
+                        filters: Object.keys(filters).length > 0 ? filters : null
                     }),
                 });
 
@@ -402,7 +417,12 @@
 
                 const data = await response.json();
                 addMessageToChat(data.answer, 'ai');
-                chatHistory.push([query, data.answer]);
+                // Backend returns the full updated chat history, we'll update our client-side state
+                // This is a simplified approach, a more robust solution might retrieve full history or append based on session_id returned.
+                // For now, we assume the backend correctly persists and returns the state.
+                // A better approach would be to refetch history after each `ask` call.
+                // However, since we're using current `chatHistory` for UI and backend handles full persistence, we just append for local view.
+                chatHistory.push([query, data.answer]); // Update local view of chat history
 
                 speakResponse(data.answer);
 
@@ -415,7 +435,7 @@
                         const yearMeta = doc.metadata && doc.metadata.publication_year ? ` (${doc.metadata.publication_year})` : '';
 
                         listItem.innerHTML = `<strong>Title:</strong> ${title}${authorMeta}${yearMeta}<br>
-                                            <strong>Chunk:</strong> ${doc.page_content.substring(0, Math.min(doc.page_content.length, 200))}...`; // Show up to 200 chars or less if chunk is smaller
+                                            <strong>Chunk:</strong> ${doc.page_content.substring(0, Math.min(doc.page_content.length, 200))}...`;
                         sourceList.appendChild(listItem);
                     });
                 }
@@ -430,6 +450,57 @@
             }
         }
 
+        // --- Session Management ---
+        function getOrCreateSessionId() {
+            let sessionId = localStorage.getItem('chat_session_id');
+            if (!sessionId) {
+                sessionId = crypto.randomUUID(); // Generate a new UUID
+                localStorage.setItem('chat_session_id', sessionId);
+            }
+            currentSessionId = sessionId;
+            sessionIdDisplay.textContent = sessionId; // Display it in the UI
+            console.log("Current Session ID:", currentSessionId);
+            return sessionId;
+        }
+
+        async function loadChatHistory() {
+            const sessionId = getOrCreateSessionId();
+            setStatus("Loading chat history...");
+            try {
+                const response = await fetch(`http://127.0.0.1:8000/get_history?session_id=${sessionId}`);
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Failed to load chat history');
+                }
+                const data = await response.json();
+                chatHistory = data.chat_history; // Update global chatHistory
+                console.log("Loaded chat history:", chatHistory);
+
+                if (chatHistory.length === 0) {
+                    const welcomeMessage = "Hello! Ask me anything about AI academic papers.";
+                    addMessageToChat(welcomeMessage, 'ai');
+                    speakResponse(welcomeMessage);
+                } else {
+                    chatHistory.forEach(([human_msg, ai_msg]) => {
+                        addMessageToChat(human_msg, 'user');
+                        addMessageToChat(ai_msg, 'ai');
+                    });
+                    setStatus("History loaded.");
+                }
+
+            } catch (error) {
+                console.error("Error loading chat history:", error);
+                setStatus(`Error loading history: ${error.message}`);
+                // If history load fails, start a new session visually
+                const welcomeMessage = "Welcome! Had trouble loading past history, starting a new chat. Ask me anything about AI academic papers.";
+                addMessageToChat(welcomeMessage, 'ai');
+                speakResponse(welcomeMessage);
+            } finally {
+                hideLoading(); // Ensure loading indicator is off
+            }
+        }
+
+        // --- Event Listeners ---
         sendButton.addEventListener('click', () => {
             sendQuery(queryInput.value);
         });
@@ -445,9 +516,8 @@
         filterAuthorInput.disabled = false;
         filterYearInput.disabled = false;
 
-        const welcomeMessage = "Hello! Ask me anything about AI academic papers.";
-        addMessageToChat(welcomeMessage, 'ai');
-        speakResponse(welcomeMessage);
+        // Load chat history when the page loads
+        document.addEventListener('DOMContentLoaded', loadChatHistory);
 
     </script>
 </body>
