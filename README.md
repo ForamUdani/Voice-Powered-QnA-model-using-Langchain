@@ -132,8 +132,16 @@ KEY FEATURES:
 3. Pinecone Vector Database: Stores and retrieves document embeddings for fast and scalable semantic search.
 4. OpenAI Integration: Employs OpenAI's embedding models for vector creation and gpt-4o-mini (or similar) for generating concise and relevant answers.
 5. Voice Input: A responsive web frontend (index.html) integrates the Web Speech API, enabling users to speak their questions directly. The spoken input is transcribed to text and then processed by the backend.
-6. FastAPI Backend: A lightweight and high-performance API (main.py) exposes the QA functionality, making it easy to integrate with other applications.
-7. n8n Integration Ready: Designed for seamless connection with automation platforms like n8n via standard HTTP requests, allowing for advanced workflow orchestration (e.g., triggering emails, logging, or database updates based on Q&A interactions).
+6. Real Time Transcription display: While the user is speaking, display the interim (live) transcription in the query-input text area. This provides immediate feedback to the user that the system is listening and accurately capturing their words.
+7. More Detailed UI Feedback: Providing clear visual cues for different states: "Listening...", "Processing...", "Thinking...", "Speaking...". This reduces user confusion.
+8. Edit/Refine Transcribed Query: Speech-to-text isn't always perfect so allowing the user to quickly review and edit the transcribed text in the query-input box before it's sent to the backend. Add a "Send" button alongside the microphone.
+9. Contextual Reranking: After retrieving an initial set of relevant documents from Pinecone, a reranker model (e.g., a cross-encoder from Hugging Face Transformers) scores the relevance of each retrieved document to the query, pushing the most relevant ones to the top. This significantly improves the quality of context provided to the LLM.
+10. More Sophisticated Chunking Strategy: Fixed chunk sizes can sometimes cut off context abruptly. So I have explored LangChain's semantic chunking, or document-aware chunking (e.g., splitting by markdown headings, paragraphs, or sections) during our ingestion process (ingest.py).
+11. Metadata Filtering & Faceted Search: Allows users to refine their search based on document metadata (e.g., "papers from 2023", "papers by a specific author").
+12. Conversational Memory Persistence using Firestore: This will ensure that when a user revisits your application, their previous chat history is loaded, providing a continuous conversation experience.
+13. "Was this helpful?" buttons: : It will store this feedback in our Firestore database (perhaps under the chat_sessions document or a separate feedback collection). And analyzes this feedback to identify common failure modes (e.g., queries where answers are consistently marked as "not helpful") and iteratively improves our data, retrieval, or prompting.
+14. FastAPI Backend: A lightweight and high-performance API (main.py) exposes the QA functionality, making it easy to integrate with other applications.
+15. n8n Integration Ready: Designed for seamless connection with automation platforms like n8n via standard HTTP requests, allowing for advanced workflow orchestration (e.g., triggering emails, logging, or database updates based on Q&A interactions).
 
 PROJECT STRUCTURE:
 
