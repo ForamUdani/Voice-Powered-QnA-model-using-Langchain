@@ -4,6 +4,7 @@ import os
 from typing import List, Tuple, Dict, Any, Optional
 from dotenv import load_dotenv
 import uuid # For generating session IDs
+import datetime # For timestamps
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -39,18 +40,28 @@ app_id = "default-app-id" # Default for local testing, will be overridden in Can
 try:
     # Check if __firebase_config and __app_id are defined (for Canvas environment)
     if '__firebase_config' in globals() and '__app_id' in globals():
-        firebase_config = JSON.parse(__firebase_config)
-        app_id = __app_id
-        # Initialize Firebase with the provided config
+        # IMPORTANT: In Canvas, __firebase_config is a stringified JSON.
+        # You need to parse it if it's not already handled by the environment.
+        # However, for Python in Canvas, it might be directly available as a dict.
+        # Let's assume it's a dict for simplicity, if it fails, you might need json.loads(__firebase_config)
+        firebase_config = globals().get('__firebase_config')
+        app_id = globals().get('__app_id')
+
+        # Use credentials.Certificate for Service Account key based auth
+        # If __firebase_config is a dict, use it directly.
+        # If it's a JSON string, uncomment: cred = credentials.Certificate(json.loads(firebase_config))
+        cred = credentials.Certificate(firebase_config)
+
         if not firebase_admin._apps: # Prevent re-initialization
-            firebase_admin.initialize_app(credentials.Certificate(firebase_config))
+            firebase_admin.initialize_app(cred)
         db = firestore.client()
         print(f"Firebase initialized for Canvas app ID: {app_id}")
     else:
         # Fallback for local development if not in Canvas environment
         # Replace 'path/to/your/serviceAccountKey.json' with your actual path
         # Ensure you've downloaded your Firebase service account key JSON file
-        cred = credentials.Certificate("serviceAccountKey.json")
+        # from Project settings > Service accounts > Generate new private key
+        cred = credentials.Certificate("serviceAccountKey.json") # Ensure this file exists for local dev
         if not firebase_admin._apps:
             firebase_admin.initialize_app(cred)
         db = firestore.client()
@@ -60,7 +71,10 @@ except Exception as e:
     db = None # Ensure db is None if initialization fails
 
 if db is None:
-    raise RuntimeError("Firestore database not initialized. Cannot proceed with persistence.")
+    # If Firebase init fails, we cannot proceed with persistence features.
+    # For a robust app, you might allow non-persistent features,
+    # but for feedback, it's mandatory.
+    raise RuntimeError("Firestore database not initialized. Cannot proceed with feedback persistence.")
 
 
 # --- LangChain Setup ---
@@ -158,7 +172,7 @@ print("ConversationalRetrievalChain initialized.")
 # --- FastAPI Application ---
 app = FastAPI(
     title="LangChain QA API",
-    description="A simple API for question answering over academic papers with voice input, RAG, Reranking, Metadata Filters, and Firestore Persistence.",
+    description="A simple API for question answering over academic papers with voice input, RAG, Reranking, Metadata Filters, and User Feedback.",
     version="1.0.0",
 )
 
@@ -175,60 +189,59 @@ class AskResponse(BaseModel):
     answer: str
     source_documents: List[dict] = [] # List of dictionaries for source info
 
-class HistoryResponse(BaseModel):
-    session_id: str
-    chat_history: List[Tuple[str, str]]
+# New Pydantic model for feedback
+class FeedbackRequest(BaseModel):
+    session_id: str = Field(..., description="The ID of the session the feedback belongs to.")
+    query: str = Field(..., description="The user's query for which the feedback is given.")
+    answer: str = Field(..., description="The AI's answer for which the feedback is given.")
+    feedback_type: str = Field(..., description="Type of feedback: 'like' or 'dislike'.")
+    timestamp: str = Field(..., description="Timestamp of the feedback.")
+    source_docs: Optional[List[dict]] = Field(None, description="Optional list of source documents used for the answer.")
 
-# Define the Firestore collection path for chat sessions
-def get_chat_sessions_collection():
-    return db.collection(f"artifacts/{app_id}/public/data/chat_sessions")
 
-@app.get("/get_history", response_model=HistoryResponse)
-async def get_history(session_id: str = Query(..., description="The session ID to retrieve chat history for.")):
+# Define the Firestore collection path for feedback
+def get_feedback_collection():
+    # Store in public data so it can be analyzed
+    return db.collection(f"artifacts/{app_id}/public/data/user_feedback")
+
+@app.post("/submit_feedback")
+async def submit_feedback(request: FeedbackRequest):
     """
-    Retrieves the chat history for a given session ID from Firestore.
+    Submits user feedback (like/dislike) to Firestore.
     """
     try:
-        doc_ref = get_chat_sessions_collection().document(session_id)
-        doc = doc_ref.get()
+        feedback_data = request.dict()
+        # Add a server-side timestamp for accuracy
+        feedback_data["server_timestamp"] = firestore.SERVER_TIMESTAMP
 
-        if doc.exists:
-            data = doc.to_dict()
-            retrieved_history = data.get("chat_history", [])
-            print(f"Retrieved history for session {session_id}: {len(retrieved_history)} turns.")
-            return HistoryResponse(session_id=session_id, chat_history=retrieved_history)
-        else:
-            print(f"No history found for session {session_id}. Returning empty.")
-            return HistoryResponse(session_id=session_id, chat_history=[])
+        # Use a unique ID for each feedback entry, could be a combination of session_id and timestamp
+        doc_id = f"{request.session_id}_{datetime.datetime.now().isoformat()}"
+        get_feedback_collection().document(doc_id).set(feedback_data)
+        print(f"Feedback submitted for session {request.session_id}, type: {request.feedback_type}")
+        return {"message": "Feedback submitted successfully!"}
     except Exception as e:
-        print(f"Error fetching history for session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error fetching history: {e}")
+        print(f"Error submitting feedback: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to submit feedback: {e}")
 
 
 @app.post("/ask", response_model=AskResponse)
 async def ask_question(request: AskRequest):
     """
-    Answers a question based on the indexed documents, maintaining conversation history,
-    applying filters, and reranking retrieved documents. History is persisted in Firestore.
+    Answers a question based on the indexed documents, applying filters,
+    and reranking retrieved documents.
     """
     try:
+        # Generate session ID if not provided (first time user)
         session_id = request.session_id if request.session_id else str(uuid.uuid4())
         print(f"Processing query for session ID: {session_id}")
 
-        # Load existing chat history from Firestore if available
-        existing_chat_history_doc = get_chat_sessions_collection().document(session_id).get()
-        current_chat_history = []
-        if existing_chat_history_doc.exists:
-            current_chat_history = existing_chat_history_doc.to_dict().get("chat_history", [])
-            print(f"Loaded {len(current_chat_history)} turns from existing history.")
-
-        # Add the new human query to the history
-        # Note: request.chat_history from frontend is often just the *current* state.
-        # We need to ensure we use the full history from Firestore + current query for LLM.
-        # LangChain's ConversationalRetrievalChain takes `chat_history` for the LLM.
-        # We'll pass `current_chat_history` (from Firestore) to the chain for rephrasing.
+        # The chat_history from the frontend is already the current state.
+        # We're no longer loading full history from Firestore on every 'ask'
+        # if the user hasn't explicitly enabled full history persistence.
+        # This current implementation assumes `request.chat_history` is what the
+        # frontend currently has and sends.
         formatted_chat_history_for_llm = []
-        for human_msg, ai_msg in current_chat_history:
+        for human_msg, ai_msg in request.chat_history:
             formatted_chat_history_for_llm.append(HumanMessage(content=human_msg))
             formatted_chat_history_for_llm.append(AIMessage(content=ai_msg))
 
@@ -242,9 +255,6 @@ async def ask_question(request: AskRequest):
 
         if not retrieved_documents:
             answer = "I couldn't find any relevant information for your query, even with the applied filters."
-            # Store the current turn (human query, no answer)
-            current_chat_history.append((request.query, answer))
-            get_chat_sessions_collection().document(session_id).set({"chat_history": current_chat_history})
             return AskResponse(session_id=session_id, answer=answer)
 
         class CustomDocsRetriever:
@@ -273,19 +283,10 @@ async def ask_question(request: AskRequest):
                     "metadata": meta_to_display
                 })
 
-        # --- Persist updated chat history to Firestore ---
-        current_chat_history.append((request.query, answer))
-        get_chat_sessions_collection().document(session_id).set({"chat_history": current_chat_history})
-        print(f"Saved {len(current_chat_history)} turns for session {session_id}.")
-
         return AskResponse(session_id=session_id, answer=answer, source_documents=source_docs_info)
-
-    except Exception as e:
-        print(f"Error processing request: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # Basic root endpoint for health check
 @app.get("/")
 async def read_root():
-    return {"message": "LangChain QA API is running. Use /ask to query or /get_history to retrieve session history."}
+    return {"message": "LangChain QA API is running. Use /ask to query or /submit_feedback to send feedback."}
 
