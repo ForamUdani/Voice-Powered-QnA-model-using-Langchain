@@ -6,7 +6,7 @@
     <title>Voice-Powered QA Chatbot</title>
     <!-- Tailwind CSS CDN for easy styling -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Font Awesome for microphone icon -->
+    <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
         body {
@@ -21,7 +21,7 @@
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             padding: 2rem;
         }
-        .mic-button, .send-button {
+        .mic-button, .send-button, .feedback-button {
             transition: background-color 0.3s ease, transform 0.1s ease;
         }
         .mic-button:hover, .send-button:hover {
@@ -42,6 +42,34 @@
         }
         .mic-button.speaking:hover {
             background-color: #059669; /* Darker green on hover when speaking */
+        }
+
+        .feedback-buttons-container {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+            align-items: center;
+        }
+        .feedback-button {
+            background-color: #e2e8f0; /* Light gray for buttons */
+            color: #475569; /* Slate gray text */
+            padding: 0.3rem 0.6rem;
+            border-radius: 0.5rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+            border: 1px solid #cbd5e1;
+        }
+        .feedback-button:hover {
+            background-color: #cbd5e1;
+        }
+        .feedback-button.selected {
+            background-color: #2563eb; /* Blue for selected feedback */
+            color: white;
+            border-color: #2563eb;
+        }
+        .feedback-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
 
         @keyframes pulse {
@@ -76,6 +104,11 @@
             background-color: #f3f4f6; /* Light gray for AI */
             align-self: flex-start;
             margin-right: auto;
+        }
+        .feedback-status {
+            font-size: 0.7rem;
+            color: #64748b; /* Slate 500 */
+            margin-left: 0.5rem;
         }
     </style>
 </head>
@@ -168,7 +201,7 @@
         const chatHistoryDiv = document.getElementById('chat-history');
         const sourceDocumentsDiv = document.getElementById('source-documents');
         const sourceList = document.getElementById('source-list');
-        const sessionIdDisplay = document.getElementById('session-id-display'); // New element for session ID
+        const sessionIdDisplay = document.getElementById('session-id-display');
 
         // Filter input elements
         const filterAuthorInput = document.getElementById('filter-author');
@@ -176,11 +209,10 @@
 
         let recognition;
         let isRecording = false;
-        let chatHistory = []; // Now represents the full history from the backend
+        let chatHistory = []; // Local representation of history for LLM
         let synth = window.speechSynthesis;
         let voices = [];
         let currentSessionId = null; // Store the current session ID
-
 
         function populateVoices() {
             voices = synth.getVoices();
@@ -357,11 +389,86 @@
             }
         }
 
-        function addMessageToChat(text, sender) {
+        // --- Feedback Functionality ---
+        async function submitFeedback(query, answer, feedbackType, sourceDocs, messageElement) {
+            const feedbackButtons = messageElement.querySelectorAll('.feedback-button');
+            const feedbackStatusSpan = messageElement.querySelector('.feedback-status');
+
+            // Disable buttons to prevent multiple submissions
+            feedbackButtons.forEach(button => button.disabled = true);
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/submit_feedback', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        session_id: currentSessionId,
+                        query: query,
+                        answer: answer,
+                        feedback_type: feedbackType,
+                        timestamp: new Date().toISOString(), // Client-side timestamp
+                        source_docs: sourceDocs // Include source docs
+                    }),
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to submit feedback');
+                }
+                const data = await response.json();
+                console.log('Feedback submission success:', data.message);
+                feedbackStatusSpan.textContent = `Feedback: ${feedbackType === 'like' ? '👍' : '👎'} submitted!`;
+
+                // Add selected class to the clicked button
+                const clickedButton = Array.from(feedbackButtons).find(btn => btn.dataset.feedbackType === feedbackType);
+                if (clickedButton) {
+                    clickedButton.classList.add('selected');
+                }
+
+            } catch (error) {
+                console.error('Error submitting feedback:', error);
+                feedbackStatusSpan.textContent = 'Feedback failed.';
+                // Re-enable buttons if submission fails, allowing retry
+                feedbackButtons.forEach(button => button.disabled = false);
+            }
+        }
+
+        function addMessageToChat(text, sender, originalQuery = null, sourceDocuments = null) {
             const messageDiv = document.createElement('div');
             messageDiv.classList.add('chat-message', sender === 'user' ? 'user-message' : 'ai-message');
             messageDiv.textContent = text;
             chatHistoryDiv.appendChild(messageDiv);
+
+            if (sender === 'ai') {
+                const feedbackContainer = document.createElement('div');
+                feedbackContainer.classList.add('feedback-buttons-container');
+
+                const likeButton = document.createElement('button');
+                likeButton.classList.add('feedback-button', 'bg-green-100', 'hover:bg-green-200', 'text-green-800');
+                likeButton.innerHTML = '<i class="far fa-thumbs-up"></i> Helpful';
+                likeButton.dataset.feedbackType = 'like';
+                likeButton.addEventListener('click', () => {
+                    submitFeedback(originalQuery, text, 'like', sourceDocuments, messageDiv);
+                });
+
+                const dislikeButton = document.createElement('button');
+                dislikeButton.classList.add('feedback-button', 'bg-red-100', 'hover:bg-red-200', 'text-red-800');
+                dislikeButton.innerHTML = '<i class="far fa-thumbs-down"></i> Not Helpful';
+                dislikeButton.dataset.feedbackType = 'dislike';
+                dislikeButton.addEventListener('click', () => {
+                    submitFeedback(originalQuery, text, 'dislike', sourceDocuments, messageDiv);
+                });
+
+                const feedbackStatusSpan = document.createElement('span');
+                feedbackStatusSpan.classList.add('feedback-status');
+
+                feedbackContainer.appendChild(likeButton);
+                feedbackContainer.appendChild(dislikeButton);
+                feedbackContainer.appendChild(feedbackStatusSpan);
+                messageDiv.appendChild(feedbackContainer);
+            }
+
             chatHistoryDiv.scrollTop = chatHistoryDiv.scrollHeight;
         }
 
@@ -379,7 +486,9 @@
                 recognition.stop();
             }
 
-            addMessageToChat(query, 'user');
+            // Store the query locally before sending for feedback linking
+            const userQueryForFeedback = query;
+            addMessageToChat(userQueryForFeedback, 'user');
             showLoading();
             sourceDocumentsDiv.classList.add('hidden');
             sourceList.innerHTML = '';
@@ -403,9 +512,9 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        session_id: currentSessionId, // Send the current session ID
-                        query: query,
-                        chat_history: chatHistory, // Still sending the current chatHistory, backend will merge with Firestore
+                        session_id: currentSessionId,
+                        query: userQueryForFeedback, // Send the exact query for feedback linking
+                        chat_history: chatHistory,
                         filters: Object.keys(filters).length > 0 ? filters : null
                     }),
                 });
@@ -416,13 +525,12 @@
                 }
 
                 const data = await response.json();
-                addMessageToChat(data.answer, 'ai');
-                // Backend returns the full updated chat history, we'll update our client-side state
-                // This is a simplified approach, a more robust solution might retrieve full history or append based on session_id returned.
-                // For now, we assume the backend correctly persists and returns the state.
-                // A better approach would be to refetch history after each `ask` call.
-                // However, since we're using current `chatHistory` for UI and backend handles full persistence, we just append for local view.
-                chatHistory.push([query, data.answer]); // Update local view of chat history
+                // Ensure session ID is updated from backend response
+                currentSessionId = data.session_id;
+                sessionIdDisplay.textContent = currentSessionId;
+
+                addMessageToChat(data.answer, 'ai', userQueryForFeedback, data.source_documents); // Pass query and sources for feedback
+                chatHistory.push([userQueryForFeedback, data.answer]);
 
                 speakResponse(data.answer);
 
@@ -442,7 +550,7 @@
 
             } catch (error) {
                 console.error('Error sending query:', error);
-                addMessageToChat(`Error: ${error.message}`, 'ai');
+                addMessageToChat(`Error: ${error.message}`, 'ai', userQueryForFeedback, []); // Pass empty sources on error
                 setStatus(`Error: ${error.message}`);
             } finally {
                 hideLoading();
@@ -463,43 +571,6 @@
             return sessionId;
         }
 
-        async function loadChatHistory() {
-            const sessionId = getOrCreateSessionId();
-            setStatus("Loading chat history...");
-            try {
-                const response = await fetch(`http://127.0.0.1:8000/get_history?session_id=${sessionId}`);
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.detail || 'Failed to load chat history');
-                }
-                const data = await response.json();
-                chatHistory = data.chat_history; // Update global chatHistory
-                console.log("Loaded chat history:", chatHistory);
-
-                if (chatHistory.length === 0) {
-                    const welcomeMessage = "Hello! Ask me anything about AI academic papers.";
-                    addMessageToChat(welcomeMessage, 'ai');
-                    speakResponse(welcomeMessage);
-                } else {
-                    chatHistory.forEach(([human_msg, ai_msg]) => {
-                        addMessageToChat(human_msg, 'user');
-                        addMessageToChat(ai_msg, 'ai');
-                    });
-                    setStatus("History loaded.");
-                }
-
-            } catch (error) {
-                console.error("Error loading chat history:", error);
-                setStatus(`Error loading history: ${error.message}`);
-                // If history load fails, start a new session visually
-                const welcomeMessage = "Welcome! Had trouble loading past history, starting a new chat. Ask me anything about AI academic papers.";
-                addMessageToChat(welcomeMessage, 'ai');
-                speakResponse(welcomeMessage);
-            } finally {
-                hideLoading(); // Ensure loading indicator is off
-            }
-        }
-
         // --- Event Listeners ---
         sendButton.addEventListener('click', () => {
             sendQuery(queryInput.value);
@@ -516,8 +587,13 @@
         filterAuthorInput.disabled = false;
         filterYearInput.disabled = false;
 
-        // Load chat history when the page loads
-        document.addEventListener('DOMContentLoaded', loadChatHistory);
+        // Initialize session and display welcome message
+        document.addEventListener('DOMContentLoaded', () => {
+            getOrCreateSessionId(); // Get or create session ID on load
+            const welcomeMessage = "Hello! Ask me anything about AI academic papers. Don't forget to give feedback!";
+            addMessageToChat(welcomeMessage, 'ai', null, null); // No query/sources for welcome
+            speakResponse(welcomeMessage);
+        });
 
     </script>
 </body>
