@@ -83,6 +83,21 @@
     <div class="container flex flex-col space-y-6">
         <h1 class="text-3xl font-bold text-center text-indigo-700 mb-6">Voice-Powered QA Chatbot</h1>
 
+        <!-- Filters Section -->
+        <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+            <h2 class="text-xl font-semibold text-gray-800 mb-3">Filters (Optional)</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="filter-author" class="block text-sm font-medium text-gray-700 mb-1">Author Name:</label>
+                    <input type="text" id="filter-author" class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., Victor Sanh">
+                </div>
+                <div>
+                    <label for="filter-year" class="block text-sm font-medium text-gray-700 mb-1">Publication Year:</label>
+                    <input type="number" id="filter-year" class="w-full p-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., 2019">
+                </div>
+            </div>
+        </div>
+
         <!-- Chat History Display -->
         <div id="chat-history" class="flex flex-col space-y-4 h-96 overflow-y-auto p-4 bg-gray-50 rounded-lg border border-gray-200">
             <!-- Chat messages will be appended here -->
@@ -141,31 +156,34 @@
         // Get references to DOM elements
         const queryInput = document.getElementById('query-input');
         const micButton = document.getElementById('mic-button');
-        const sendButton = document.getElementById('send-button'); // New send button
-        const statusDisplay = document.getElementById('status-display'); // New status display
+        const sendButton = document.getElementById('send-button');
+        const statusDisplay = document.getElementById('status-display');
         const loadingIndicator = document.getElementById('loading-indicator');
         const speakingIndicator = document.getElementById('speaking-indicator');
         const chatHistoryDiv = document.getElementById('chat-history');
         const sourceDocumentsDiv = document.getElementById('source-documents');
         const sourceList = document.getElementById('source-list');
 
-        let recognition; // SpeechRecognition object
-        let isRecording = false;
-        let chatHistory = []; // Stores conversation history for the backend: List of [human_message, ai_message] tuples
-        let synth = window.speechSynthesis; // SpeechSynthesis object
-        let voices = []; // Array to store available voices
+        // Filter input elements
+        const filterAuthorInput = document.getElementById('filter-author');
+        const filterYearInput = document.getElementById('filter-year');
 
-        // Function to populate voices
+
+        let recognition;
+        let isRecording = false;
+        let chatHistory = [];
+        let synth = window.speechSynthesis;
+        let voices = [];
+
         function populateVoices() {
             voices = synth.getVoices();
             console.log("Available voices:", voices.map(v => v.name));
         }
 
-        // Populate voices when they are loaded (async)
         if (synth.onvoiceschanged !== undefined) {
             synth.onvoiceschanged = populateVoices;
         } else {
-            populateVoices(); // Fallback for browsers that don't fire onvoiceschanged immediately
+            populateVoices();
         }
 
         // --- UI Feedback Functions ---
@@ -176,29 +194,31 @@
         function showLoading() {
             loadingIndicator.classList.remove('hidden');
             loadingIndicator.classList.add('flex');
-            setStatus('Processing query...'); // Update status display
+            setStatus('Processing query...');
         }
 
         function hideLoading() {
             loadingIndicator.classList.add('hidden');
             loadingIndicator.classList.remove('flex');
-            setStatus(''); // Clear status when not loading
+            setStatus('');
         }
 
         function showSpeaking() {
             speakingIndicator.classList.remove('hidden');
             speakingIndicator.classList.add('flex');
             micButton.classList.add('speaking');
-            sendButton.disabled = true; // Disable send button while AI is speaking
-            setStatus('AI is speaking...'); // Update status display
+            sendButton.disabled = true;
+            queryInput.disabled = true; // Disable input while AI is speaking
+            setStatus('AI is speaking...');
         }
 
         function hideSpeaking() {
             speakingIndicator.classList.add('hidden');
             speakingIndicator.classList.remove('flex');
             micButton.classList.remove('speaking');
-            sendButton.disabled = false; // Re-enable send button
-            setStatus(''); // Clear status when not speaking
+            sendButton.disabled = false;
+            queryInput.disabled = false; // Enable input
+            setStatus('');
         }
         // --- End UI Feedback Functions ---
 
@@ -208,17 +228,15 @@
             micButton.disabled = true;
             micButton.title = "Speech recognition not supported in this browser.";
             micButton.classList.add('opacity-50', 'cursor-not-allowed');
-            alert("Speech recognition is not supported in your browser. Please use Google Chrome for this feature.");
-            sendButton.disabled = false; // Ensure send button is still active for typing
+            setStatus('Speech recognition not supported in this browser.');
+            sendButton.disabled = false;
         } else {
-            // Initialize SpeechRecognition
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             recognition = new SpeechRecognition();
-            recognition.continuous = true; // Set to true for interim results
-            recognition.interimResults = true; // Get interim results
+            recognition.continuous = true;
+            recognition.interimResults = true;
             recognition.lang = 'en-US';
 
-            // Event handler for when speech recognition starts
             recognition.onstart = () => {
                 isRecording = true;
                 micButton.classList.add('recording');
@@ -226,25 +244,25 @@
                 micButton.innerHTML = '<i class="fas fa-microphone-slash text-2xl"></i>';
                 micButton.title = "Stop speaking";
                 queryInput.placeholder = "Listening...";
-                sendButton.disabled = true; // Disable send button while listening
-                hideSpeaking(); // Hide speaking indicator if it was active
+                sendButton.disabled = true;
+                queryInput.disabled = true; // Disable input while listening
+                hideSpeaking();
                 setStatus('Listening...');
                 console.log('Speech recognition started');
             };
 
-            // Event handler for when speech recognition ends
             recognition.onend = () => {
                 isRecording = false;
                 micButton.classList.remove('recording');
                 micButton.innerHTML = '<i class="fas fa-microphone text-2xl"></i>';
                 micButton.title = "Start speaking";
                 queryInput.placeholder = "Type your question or press the mic to speak...";
-                sendButton.disabled = false; // Re-enable send button after listening
-                setStatus(''); // Clear listening status
+                sendButton.disabled = false;
+                queryInput.disabled = false; // Enable input
+                setStatus('');
                 console.log('Speech recognition ended');
             };
 
-            // Event handler for when a speech recognition result is available
             recognition.onresult = (event) => {
                 let interimTranscript = '';
                 let finalTranscript = '';
@@ -256,14 +274,10 @@
                         interimTranscript += event.results[i][0].transcript;
                     }
                 }
-                // Display both final and interim results
                 queryInput.value = finalTranscript + interimTranscript;
                 console.log('Interim:', interimTranscript, 'Final:', finalTranscript);
-                // IMPORTANT: The query is NO LONGER sent automatically here.
-                // User must click "Send" or press Enter.
             };
 
-            // Event handler for speech recognition errors
             recognition.onerror = (event) => {
                 console.error('Speech recognition error:', event.error);
                 if (event.error === 'no-speech') {
@@ -279,30 +293,28 @@
                 micButton.innerHTML = '<i class="fas fa-microphone text-2xl"></i>';
                 micButton.title = "Start speaking";
                 queryInput.placeholder = "Type your question or press the mic to speak...";
-                sendButton.disabled = false; // Re-enable send button on error
+                sendButton.disabled = false;
+                queryInput.disabled = false;
                 hideLoading();
             };
 
-            // Toggle speech recognition on mic button click
             micButton.addEventListener('click', () => {
                 if (isRecording) {
                     recognition.stop();
                 } else if (synth.speaking) {
-                    // If AI is speaking, stop it first, then start listening
                     synth.cancel();
                     hideSpeaking();
                     recognition.start();
                 } else {
-                    queryInput.value = ''; // Clear previous query before listening
+                    queryInput.value = '';
                     recognition.start();
                 }
             });
         }
 
-        // Function to speak the AI's response
         function speakResponse(text) {
             if (synth.speaking) {
-                synth.cancel(); // Stop any ongoing speech
+                synth.cancel();
             }
 
             if ('SpeechSynthesisUtterance' in window) {
@@ -318,11 +330,11 @@
 
                 utterance.onstart = () => {
                     showSpeaking();
-                    micButton.disabled = true; // Disable mic button while AI is speaking
+                    micButton.disabled = true;
                 };
                 utterance.onend = () => {
                     hideSpeaking();
-                    micButton.disabled = false; // Re-enable mic button after AI finishes speaking
+                    micButton.disabled = false;
                 };
                 utterance.onerror = (event) => {
                     console.error('Speech synthesis error:', event.error);
@@ -338,37 +350,48 @@
             }
         }
 
-
-        // Function to send query to the backend
         async function sendQuery(query) {
             if (!query.trim()) {
                 setStatus("Please enter or speak a question.");
                 return;
             }
 
-            // Stop any ongoing speech before sending new query
             if (synth.speaking) {
                 synth.cancel();
                 hideSpeaking();
             }
-            if (isRecording) { // Stop recording if user hits send while speaking
-                recognition.stop();
+            if (isRecording) {
+                recognition.stop(); // Stop recording if user hits send while speaking
             }
 
             addMessageToChat(query, 'user');
-            showLoading(); // Show "Processing query..."
-            sourceDocumentsDiv.classList.add('hidden'); // Hide previous sources
-            sourceList.innerHTML = ''; // Clear previous sources
+            showLoading();
+            sourceDocumentsDiv.classList.add('hidden');
+            sourceList.innerHTML = '';
+
+            // --- Collect Filters ---
+            const filters = {};
+            const author = filterAuthorInput.value.trim();
+            const year = filterYearInput.value.trim();
+
+            if (author) {
+                filters.author = author;
+            }
+            if (year) {
+                filters.publication_year = year;
+            }
+            console.log("Sending query with filters:", filters);
 
             try {
-                const response = await fetch('http://127.0.0.1:8000/ask', { // Replace with your FastAPI URL if deployed
+                const response = await fetch('http://127.0.0.1:8000/ask', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
                         query: query,
-                        chat_history: chatHistory
+                        chat_history: chatHistory,
+                        filters: Object.keys(filters).length > 0 ? filters : null // Send null if no filters
                     }),
                 });
 
@@ -383,15 +406,16 @@
 
                 speakResponse(data.answer);
 
-                // Display source documents if available
                 if (data.source_documents && data.source_documents.length > 0) {
                     sourceDocumentsDiv.classList.remove('hidden');
                     data.source_documents.forEach(doc => {
                         const listItem = document.createElement('li');
-                        // Ensure 'metadata' and 'title' exist before accessing
                         const title = doc.metadata && doc.metadata.title ? doc.metadata.title : 'N/A';
-                        listItem.innerHTML = `<strong>Title:</strong> ${title}<br>
-                                            <strong>Chunk:</strong> ${doc.page_content.substring(0, 200)}...`;
+                        const authorMeta = doc.metadata && doc.metadata.first_author ? ` by ${doc.metadata.first_author}` : '';
+                        const yearMeta = doc.metadata && doc.metadata.publication_year ? ` (${doc.metadata.publication_year})` : '';
+
+                        listItem.innerHTML = `<strong>Title:</strong> ${title}${authorMeta}${yearMeta}<br>
+                                            <strong>Chunk:</strong> ${doc.page_content.substring(0, Math.min(doc.page_content.length, 200))}...`; // Show up to 200 chars or less if chunk is smaller
                         sourceList.appendChild(listItem);
                     });
                 }
@@ -402,27 +426,25 @@
                 setStatus(`Error: ${error.message}`);
             } finally {
                 hideLoading();
-                queryInput.value = ''; // Clear input after sending
+                queryInput.value = '';
             }
         }
 
-        // --- Event Listeners for sending query ---
-        // New: Send button click
         sendButton.addEventListener('click', () => {
             sendQuery(queryInput.value);
         });
 
-        // Existing: Allow sending query by pressing Enter in the text area
         queryInput.addEventListener('keypress', (event) => {
-            if (event.key === 'Enter' && !event.shiftKey) { // Shift+Enter for new line
-                event.preventDefault(); // Prevent default Enter behavior (new line)
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
                 sendQuery(queryInput.value);
             }
         });
-        // --- End Event Listeners ---
 
+        // Initialize filter inputs to be enabled
+        filterAuthorInput.disabled = false;
+        filterYearInput.disabled = false;
 
-        // Initial welcome message and speak it
         const welcomeMessage = "Hello! Ask me anything about AI academic papers.";
         addMessageToChat(welcomeMessage, 'ai');
         speakResponse(welcomeMessage);
