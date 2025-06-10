@@ -9,4 +9,5 @@ uvicorn[standard]
 python-dotenv
 datasets
 pandas
-sentence-transformers # Added for reranking
+sentence-transformers
+firebase-admin # Though handled via direct imports, good to list for clarity.
