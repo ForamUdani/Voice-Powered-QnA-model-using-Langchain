@@ -9,3 +9,4 @@ uvicorn[standard]
 python-dotenv
 datasets
 pandas
+sentence-transformers # Added for reranking
