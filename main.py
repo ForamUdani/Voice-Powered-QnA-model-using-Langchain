@@ -2,10 +2,27 @@
 
 import os
 from typing import List, Tuple, Dict, Any, Optional
-from dotenv import load_dotenv
+from dotenv import load_dotenv # Ensure this is at the very top
 import uuid
 import datetime
-import json # For parsing firebase config string in Canvas
+import json
+
+# Load environment variables including LangSmith keys
+load_dotenv()
+
+# --- Configuration ---
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
+PINECONE_INDEX_NAME = "ai-arxiv-chunks-langchain"
+
+# LangSmith specific environment variables (set these in your .env file)
+# os.environ["LANGCHAIN_TRACING_V2"] = "true" # Already loaded by dotenv
+# os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGCHAIN_API_KEY") # Already loaded by dotenv
+# os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT", "Voice_QA_Bot") # Default project name if not set
+
+if not all([OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENVIRONMENT]):
+    raise ValueError("Please set OPENAI_API_KEY, PINECONE_API_KEY, and PINECONE_ENVIRONMENT environment variables.")
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -21,26 +38,15 @@ from sentence_transformers import CrossEncoder
 # New imports for Hybrid Search
 from langchain.retrievers import EnsembleRetriever
 from langchain_community.retrievers import BM25Retriever
-from langchain_community.document_loaders import DataFrameLoader # To load data for BM25
-from datasets import load_dataset # To load data for BM25
-import pandas as pd # For processing data for BM25
-from langchain_text_splitters import RecursiveCharacterTextSplitter # For BM25 data preparation
+from langchain_community.document_loaders import DataFrameLoader
+from datasets import load_dataset
+import pandas as pd
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Firebase Admin SDK imports
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# Load environment variables
-load_dotenv()
-
-# --- Configuration ---
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
-PINECONE_INDEX_NAME = "ai-arxiv-chunks-langchain"
-
-if not all([OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENVIRONMENT]):
-    raise ValueError("Please set OPENAI_API_KEY, PINECONE_API_KEY, and PINECONE_ENVIRONMENT environment variables.")
 
 # --- Firebase Initialization ---
 db = None
@@ -48,7 +54,6 @@ app_id = "default-app-id" # Default for local testing, will be overridden in Can
 
 try:
     if '__firebase_config' in globals() and '__app_id' in globals():
-        # In Canvas, __firebase_config is a stringified JSON.
         firebase_config_dict = json.loads(globals().get('__firebase_config'))
         app_id = globals().get('__app_id')
 
@@ -58,8 +63,7 @@ try:
         db = firestore.client()
         print(f"Firebase initialized for Canvas app ID: {app_id}")
     else:
-        # Fallback for local development
-        cred = credentials.Certificate("serviceAccountKey.json") # Ensure this file exists for local dev
+        cred = credentials.Certificate("serviceAccountKey.json")
         if not firebase_admin._apps:
             firebase_admin.initialize_app(cred)
         db = firestore.client()
@@ -86,15 +90,12 @@ pinecone_vectorstore = PineconeVectorStore(
 print(f"Pinecone vectorstore initialized for index: {PINECONE_INDEX_NAME}")
 
 # 3. BM25 Retriever (for Hybrid Search)
-# This part loads the dataset again to build an in-memory BM25 index.
-# This might take a moment on startup but ensures the BM25 index is ready.
 print("Loading dataset for BM25 indexing...")
 bm25_dataset = load_dataset("jamescalam/ai-arxiv-chunked", split="train")
 bm25_df = bm25_dataset.to_pandas()
 bm25_df = bm25_df.dropna(subset=["chunk"])
 bm25_df["page_content"] = bm25_df.apply(lambda row: f"Title: {row['title']}\n\nChunk: {row['chunk']}", axis=1)
 
-# Re-chunking for BM25 to match what Pinecone has (or to be consistent)
 bm25_text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=1000,
     chunk_overlap=200,
@@ -110,15 +111,15 @@ print(f"BM25 retriever initialized with {len(bm25_documents)} documents.")
 llm = ChatOpenAI(
     openai_api_key=OPENAI_API_KEY,
     model="gpt-4o-mini",
-    temperature=0.2 # Lowered temperature for less creativity, more factualness
+    temperature=0.2
 )
 print(f"LLM initialized: {llm.model_name} with temperature={llm.temperature}")
 
-# LLM for Groundedness Check (can be a smaller, faster model)
+# LLM for Groundedness Check
 groundedness_llm = ChatOpenAI(
     openai_api_key=OPENAI_API_KEY,
-    model="gpt-3.5-turbo", # Faster and cheaper for verification
-    temperature=0.0 # Very low temperature for strict factual check
+    model="gpt-3.5-turbo",
+    temperature=0.0
 )
 print(f"Groundedness LLM initialized: {groundedness_llm.model_name} with temperature={groundedness_llm.temperature}")
 
@@ -130,10 +131,6 @@ print(f"Reranker initialized: {reranker_model_name}")
 
 # 6. Define a custom retrieval function that incorporates Hybrid Search, Filtering, and Reranking
 async def get_filtered_hybrid_and_reranked_documents(query: str, filters: Optional[Dict[str, Any]] = None, top_k_ensemble: int = 40, top_k_rerank: int = 5) -> List[Document]:
-    """
-    Retrieves documents using hybrid search (Pinecone + BM25), applies filters to Pinecone
-    results, and then reranks the combined results.
-    """
     pinecone_filter = {}
     if filters:
         if 'publication_year' in filters and filters['publication_year']:
@@ -141,25 +138,17 @@ async def get_filtered_hybrid_and_reranked_documents(query: str, filters: Option
         if 'author' in filters and filters['author']:
             pinecone_filter['first_author'] = {"$eq": str(filters['author'])}
 
-    # Configure Pinecone retriever with filters
     pinecone_retriever = pinecone_vectorstore.as_retriever(
-        search_kwargs={"k": top_k_ensemble // 2, "filter": pinecone_filter} # Pinecone gets half the top_k
+        search_kwargs={"k": top_k_ensemble // 2, "filter": pinecone_filter}
     )
 
-    # BM25 retriever does not support filters directly in search_kwargs for `invoke` method.
-    # BM25 operates on the initially loaded documents. If you need filtering on BM25,
-    # you'd pre-filter the `bm25_documents` before creating the BM25Retriever.
-    # For now, BM25 operates on the full corpus for broader keyword matching.
-    bm25_retriever.k = top_k_ensemble // 2 # BM25 also gets half the top_k
+    bm25_retriever.k = top_k_ensemble // 2
 
-    # Create EnsembleRetriever
     ensemble_retriever = EnsembleRetriever(
         retrievers=[pinecone_retriever, bm25_retriever],
-        weights=[0.5, 0.5] # Adjust weights based on desired balance
+        weights=[0.5, 0.5]
     )
 
-    # Retrieve documents using the ensemble retriever
-    # We use .ainvoke() for asynchronous call
     retrieved_docs = await ensemble_retriever.ainvoke(query)
 
     print(f"Retrieved {len(retrieved_docs)} documents from hybrid search (before reranking).")
@@ -167,7 +156,6 @@ async def get_filtered_hybrid_and_reranked_documents(query: str, filters: Option
     if not retrieved_docs:
         return []
 
-    # Rerank the retrieved documents
     sentence_pairs = [[query, doc.page_content] for doc in retrieved_docs]
     rerank_scores = reranker.predict(sentence_pairs)
 
@@ -175,10 +163,8 @@ async def get_filtered_hybrid_and_reranked_documents(query: str, filters: Option
     for i, score in enumerate(rerank_scores):
         scored_docs.append({"doc": retrieved_docs[i], "score": score})
 
-    # Sort documents by score in descending order
     scored_docs.sort(key=lambda x: x["score"], reverse=True)
 
-    # Select the top_k_rerank documents to pass to the LLM
     reranked_docs = [item["doc"] for item in scored_docs[:top_k_rerank]]
     print(f"Selected {len(reranked_docs)} documents after reranking.")
 
@@ -186,12 +172,8 @@ async def get_filtered_hybrid_and_reranked_documents(query: str, filters: Option
 
 # 7. Groundedness Check Function (Anti-Hallucination)
 async def check_groundedness(answer: str, retrieved_docs: List[Document]) -> bool:
-    """
-    Uses an LLM to check if the generated answer is directly supported by the retrieved documents.
-    Returns True if grounded, False otherwise.
-    """
     if not retrieved_docs:
-        return False # Cannot be grounded if no documents were provided
+        return False
 
     context_str = "\n".join([doc.page_content for doc in retrieved_docs])
 
@@ -284,7 +266,7 @@ async def submit_feedback(request: FeedbackRequest):
     try:
         feedback_data = request.dict()
         feedback_data["server_timestamp"] = firestore.SERVER_TIMESTAMP
-        doc_id = f"{request.session_id}_{datetime.datetime.now().isoformat().replace('.', '-')}" # Make doc ID Firestore-friendly
+        doc_id = f"{request.session_id}_{datetime.datetime.now().isoformat().replace('.', '-')}"
         get_feedback_collection().document(doc_id).set(feedback_data)
         print(f"Feedback submitted for session {request.session_id}, type: {request.feedback_type}")
         return {"message": "Feedback submitted successfully!"}
@@ -308,12 +290,12 @@ async def ask_question(request: AskRequest):
             formatted_chat_history_for_llm.append(HumanMessage(content=human_msg))
             formatted_chat_history_for_llm.append(AIMessage(content=ai_msg))
 
-        # Step 1: Retrieve and Rerank documents using our custom hybrid search function
+        # Retrieve and Rerank documents using our custom hybrid search function
         retrieved_documents = await get_filtered_hybrid_and_reranked_documents(
             query=request.query,
             filters=request.filters,
-            top_k_ensemble=40, # Retrieve more docs for ensemble and reranking
-            top_k_rerank=5      # Final number of docs to pass to LLM
+            top_k_ensemble=40,
+            top_k_rerank=5
         )
 
         if not retrieved_documents:
@@ -331,6 +313,7 @@ async def ask_question(request: AskRequest):
         custom_retriever = CustomDocsRetriever(retrieved_documents)
 
         # Invoke the QA chain with the custom retriever
+        # This invocation will be traced in LangSmith
         result = await qa_chain.ainvoke({
             "question": request.query,
             "chat_history": formatted_chat_history_for_llm,
@@ -347,12 +330,12 @@ async def ask_question(request: AskRequest):
                     "metadata": meta_to_display
                 })
 
-        # Step 2: Perform Groundedness Check
+        # Perform Groundedness Check
         is_grounded = await check_groundedness(generated_answer, retrieved_documents)
 
         if not is_grounded:
             answer = "I cannot find a definitive answer to this question based on the provided information, as I could not verify all parts of the generated response from the retrieved context. Please try rephrasing."
-            source_docs_info = [] # Clear sources if not grounded
+            source_docs_info = []
         else:
             answer = generated_answer
 
