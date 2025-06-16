@@ -290,7 +290,6 @@ async def ask_question(request: AskRequest):
             formatted_chat_history_for_llm.append(HumanMessage(content=human_msg))
             formatted_chat_history_for_llm.append(AIMessage(content=ai_msg))
 
-        # Retrieve and Rerank documents using our custom hybrid search function
         retrieved_documents = await get_filtered_hybrid_and_reranked_documents(
             query=request.query,
             filters=request.filters,
@@ -312,34 +311,42 @@ async def ask_question(request: AskRequest):
 
         custom_retriever = CustomDocsRetriever(retrieved_documents)
 
-        # Invoke the QA chain with the custom retriever
-        # This invocation will be traced in LangSmith
-        result = await qa_chain.ainvoke({
-            "question": request.query,
-            "chat_history": formatted_chat_history_for_llm,
-        }, config={"retriever": custom_retriever})
+        # Corrected: Added a try-except block around qa_chain.ainvoke
+        try: # This is the corrected try block
+            result = await qa_chain.ainvoke({
+                "question": request.query,
+                "chat_history": formatted_chat_history_for_llm,
+            }, config={"retriever": custom_retriever})
 
-        generated_answer = result["answer"]
-        source_docs_info = []
-
-        if "source_documents" in result and result["source_documents"]:
-            for doc in result["source_documents"]:
-                meta_to_display = {k: v for k, v in doc.metadata.items() if k not in ['text_chunk_id', 'vector_id']}
-                source_docs_info.append({
-                    "page_content": doc.page_content,
-                    "metadata": meta_to_display
-                })
-
-        # Perform Groundedness Check
-        is_grounded = await check_groundedness(generated_answer, retrieved_documents)
-
-        if not is_grounded:
-            answer = "I cannot find a definitive answer to this question based on the provided information, as I could not verify all parts of the generated response from the retrieved context. Please try rephrasing."
+            generated_answer = result["answer"]
             source_docs_info = []
-        else:
-            answer = generated_answer
 
-        return AskResponse(session_id=session_id, answer=answer, source_documents=source_docs_info)
+            if "source_documents" in result and result["source_documents"]:
+                for doc in result["source_documents"]:
+                    meta_to_display = {k: v for k, v in doc.metadata.items() if k not in ['text_chunk_id', 'vector_id']}
+                    source_docs_info.append({
+                        "page_content": doc.page_content,
+                        "metadata": meta_to_display
+                    })
+
+            # Perform Groundedness Check
+            is_grounded = await check_groundedness(generated_answer, retrieved_documents)
+
+            if not is_grounded:
+                answer = "I cannot find a definitive answer to this question based on the provided information, as I could not verify all parts of the generated response from the retrieved context. Please try rephrasing."
+                source_docs_info = []
+            else:
+                answer = generated_answer
+
+            return AskResponse(session_id=session_id, answer=answer, source_documents=source_docs_info)
+
+        except Exception as chain_e: # Added an except block here
+            print(f"Error during QA chain invocation: {chain_e}")
+            raise HTTPException(status_code=500, detail=f"Error generating answer: {chain_e}")
+
+    except Exception as e:
+        print(f"Unhandled error in /ask endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
 # Basic root endpoint for health check
 @app.get("/")
