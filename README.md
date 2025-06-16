@@ -140,8 +140,11 @@ KEY FEATURES:
 11. Metadata Filtering & Faceted Search: Allows users to refine their search based on document metadata (e.g., "papers from 2023", "papers by a specific author").
 12. Conversational Memory Persistence using Firestore: This will ensure that when a user revisits your application, their previous chat history is loaded, providing a continuous conversation experience.
 13. "Was this helpful?" buttons: : It will store this feedback in our Firestore database (perhaps under the chat_sessions document or a separate feedback collection). And analyzes this feedback to identify common failure modes (e.g., queries where answers are consistently marked as "not helpful") and iteratively improves our data, retrieval, or prompting.
-14. FastAPI Backend: A lightweight and high-performance API (main.py) exposes the QA functionality, making it easy to integrate with other applications.
-15. n8n Integration Ready: Designed for seamless connection with automation platforms like n8n via standard HTTP requests, allowing for advanced workflow orchestration (e.g., triggering emails, logging, or database updates based on Q&A interactions).
+14. Hybrid Search (Semantic + Keyword): Combining Pinecone's vector search with a BM25 keyword search using LangChain's EnsembleRetriever. This ensures both conceptual relevance and exact keyword matches are found.
+15. Groundedness Check (Anti-Hallucination): After the LLM generates an answer, we'll perform a secondary check using another LLM call to verify if the answer's claims are directly supported by the retrieved source documents. If not, a generic "I don't know" message will be returned.
+16. Stricter Prompting: Have slightly refined the LLM's system prompt to emphasize adherence to the provided context.
+17. FastAPI Backend: A lightweight and high-performance API (main.py) exposes the QA functionality, making it easy to integrate with other applications.
+18. n8n Integration Ready: Designed for seamless connection with automation platforms like n8n via standard HTTP requests, allowing for advanced workflow orchestration (e.g., triggering emails, logging, or database updates based on Q&A interactions).
 
 PROJECT STRUCTURE:
 
