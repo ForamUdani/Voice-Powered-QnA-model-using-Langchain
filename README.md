@@ -72,21 +72,21 @@ For local development, you'll typically:
 For Canvas Environment, the __app_id, __firebase_config, and __initial_auth_token variables are automatically provided, and the Firestore setup will be handled using these. I will use the Canvas-compatible initialization in the code.
 
 How to Use:
-    1. Firebase Service Account Key (Local Only):
-        a. If running locally (not in the Canvas environment), download your Firebase service account key JSON file and place it in the same directory as main.py.
-        b. Make sure the file is named serviceAccountKey.json or update the path in main.py accordingly.
-    2. Update main.py and index.html: Replace the contents of your existing files with the updated code provided above.
-    3. Install Firebase Admin SDK: If you haven't already, install it:
-        pip install firebase-admin
-    4. Run ingest.py (Optional, but Recommended): If you haven't done so after the previous update, run python ingest.py to ensure your Pinecone index has the correct metadata (publication_year, first_author) which is crucial for the filtering feature to work correctly.
-    5. Run main.py: Start your FastAPI application: uvicorn main:app --reload.
-    6. Open index.html: Open the index.html file in a Google Chrome browser.
+1. Firebase Service Account Key (Local Only):
+    a. If running locally (not in the Canvas environment), download your Firebase service account key JSON file and place it in the same directory as main.py.
+    b. Make sure the file is named serviceAccountKey.json or update the path in main.py accordingly.
+2. Update main.py and index.html: Replace the contents of your existing files with the updated code provided above.
+3. Install Firebase Admin SDK: If you haven't already, install it:
+    pip install firebase-admin
+4. Run ingest.py (Optional, but Recommended): If you haven't done so after the previous update, run python ingest.py to ensure your Pinecone index has the correct metadata (publication_year, first_author) which is crucial for the filtering feature to work correctly.                                                                
+5. Run main.py: Start your FastAPI application: uvicorn main:app --reload.                     
+6. Open index.html: Open the index.html file in a Google Chrome browser.                         
 
 Testing Persistence:
-    1. Open index.html in Chrome. Ask a few questions.
-    2. Observe the "Session ID" displayed. This ID is stored in your browser's localStorage.
-    3. Close the browser tab completely.
-    4. Reopen index.html. You should see the previous conversation load automatically based on the session_id       retrieved from localStorage, and the AI will speak the last message or a welcome message if the history was empty.
+1. Open index.html in Chrome. Ask a few questions.
+2. Observe the "Session ID" displayed. This ID is stored in your browser's localStorage.
+3. Close the browser tab completely.
+4. Reopen index.html. You should see the previous conversation load automatically based on the session_id       retrieved from localStorage, and the AI will speak the last message or a welcome message if the history was empty.
 This setup provides robust conversational memory persistence, making your Q&A model much more practical and user-friendly for repeated interactions!
 
 CONNECTING TO n8n
