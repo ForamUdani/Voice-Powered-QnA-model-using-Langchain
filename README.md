@@ -13,6 +13,10 @@ To run ingest.py:
             OPENAI_API_KEY="your_openai_api_key_here"
             PINECONE_API_KEY="your_pinecone_api_key_here"
             PINECONE_ENVIRONMENT="your_pinecone_environment_here" # e.g., "gcp-starter"
+            # LangSmith Configuration (for evaluation and tracing)
+            LANGCHAIN_TRACING_V2=true                                                                       
+            LANGCHAIN_API_KEY="ls__your_langsmith_api_key_here"                                                   
+            LANGCHAIN_PROJECT="Your_Voice_QA_Chatbot_Project" # A name for your project in LangSmith UI           
     c. Install the necessary libraries (see requirements.txt below).
     d. Run the script from your terminal: python ingest.py
 
