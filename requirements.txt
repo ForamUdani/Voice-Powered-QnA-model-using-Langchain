@@ -11,3 +11,5 @@ datasets
 pandas
 sentence-transformers
 firebase-admin # Though handled via direct imports, good to list for clarity.
+langsmith # Added for LangSmith integration
+
