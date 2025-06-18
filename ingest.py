@@ -18,7 +18,7 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT") # e.g., "gcp-starter" or your specific environment
-PINECONE_INDEX_NAME = "rag-index" # Name for your Pinecone index
+PINECONE_INDEX_NAME = "YOUR_PINECONE_INDEX_NAME" # Name for your Pinecone index
 
 if not all([OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_ENVIRONMENT]):
     raise ValueError("Please set OPENAI_API_KEY, PINECONE_API_KEY, and PINECONE_ENVIRONMENT environment variables.")
