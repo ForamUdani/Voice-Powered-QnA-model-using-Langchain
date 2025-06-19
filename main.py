@@ -14,7 +14,7 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
-PINECONE_INDEX_NAME = "ai-arxiv-chunks-langchain"
+PINECONE_INDEX_NAME = "YOUR_PINECONE_INDEX_NAME"
 
 # LangSmith specific environment variables (set these in your .env file)
 # os.environ["LANGCHAIN_TRACING_V2"] = "true" # Already loaded by dotenv
