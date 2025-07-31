@@ -4,9 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Voice-Powered QA Chatbot</title>
-    <!-- Tailwind CSS CDN for easy styling -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Font Awesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
         body {
@@ -110,18 +108,40 @@
             color: #64748b; /* Slate 500 */
             margin-left: 0.5rem;
         }
+        /* New styles for follow-up questions */
+        .follow-up-questions-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+        .follow-up-button {
+            background-color: #eff6ff; /* Light blue */
+            color: #1e40af; /* Darker blue text */
+            padding: 0.4rem 0.8rem;
+            border-radius: 0.5rem;
+            font-size: 0.9rem;
+            cursor: pointer;
+            border: 1px solid #bfdbfe;
+            transition: background-color 0.2s ease, transform 0.1s ease;
+        }
+        .follow-up-button:hover {
+            background-color: #dbeafe; /* Lighter blue on hover */
+            transform: translateY(-1px);
+        }
+        .follow-up-button:active {
+            transform: scale(0.98);
+        }
     </style>
 </head>
 <body class="p-4">
     <div class="container flex flex-col space-y-6">
         <h1 class="text-3xl font-bold text-center text-indigo-700 mb-6">Voice-Powered QA Chatbot</h1>
 
-        <!-- Session ID Display (for debugging/info) -->
         <div class="text-sm text-gray-500 text-center">
             Session ID: <span id="session-id-display">Loading...</span>
         </div>
 
-        <!-- Filters Section -->
         <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
             <h2 class="text-xl font-semibold text-gray-800 mb-3">Filters (Optional)</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -136,12 +156,9 @@
             </div>
         </div>
 
-        <!-- Chat History Display -->
         <div id="chat-history" class="flex flex-col space-y-4 h-96 overflow-y-auto p-4 bg-gray-50 rounded-lg border border-gray-200">
-            <!-- Chat messages will be appended here -->
-        </div>
+            </div>
 
-        <!-- Query Input, Microphone Button, and Send Button -->
         <div class="flex items-center space-x-4">
             <textarea
                 id="query-input"
@@ -165,28 +182,22 @@
             </button>
         </div>
 
-        <!-- Status Indicators -->
         <div id="status-display" class="text-center text-gray-600 font-medium">
-            <!-- Dynamic status messages like "Listening...", "Processing...", etc. -->
-        </div>
+            </div>
 
-        <!-- Loading Indicator (for processing/thinking) -->
         <div id="loading-indicator" class="hidden flex items-center justify-center space-x-2 text-indigo-600">
             <div class="loading-spinner"></div>
             <span>Processing query...</span>
         </div>
-         <!-- Speaking Indicator -->
-        <div id="speaking-indicator" class="hidden flex items-center justify-center space-x-2 text-green-600">
+         <div id="speaking-indicator" class="hidden flex items-center justify-center space-x-2 text-green-600">
             <i class="fas fa-volume-up text-xl"></i>
             <span>AI is speaking...</span>
         </div>
 
-        <!-- Source Documents Display -->
         <div id="source-documents" class="hidden mt-4 p-4 bg-gray-100 rounded-lg border border-gray-200">
             <h3 class="text-lg font-semibold text-gray-800 mb-2">Source Documents:</h3>
             <ul id="source-list" class="list-disc pl-5 text-gray-700 text-sm">
-                <!-- Source documents will be appended here -->
-            </ul>
+                </ul>
         </div>
     </div>
 
@@ -209,10 +220,10 @@
 
         let recognition;
         let isRecording = false;
-        let chatHistory = []; // Local representation of history for LLM
+        // let chatHistory = []; // Removed: No longer needed for conversational memory
         let synth = window.speechSynthesis;
         let voices = [];
-        let currentSessionId = null; // Store the current session ID
+        let currentSessionId = null; // Still needed for feedback
 
         function populateVoices() {
             voices = synth.getVoices();
@@ -322,8 +333,9 @@
                 if (event.error === 'no-speech') {
                     setStatus('No speech detected. Please try again.');
                 } else if (event.error === 'not-allowed') {
-                    alert('Microphone access denied. Please allow microphone access in your browser settings.');
-                    setStatus('Microphone access denied.');
+                    const errorMessage = 'Microphone access denied. Please allow microphone access in your browser settings.';
+                    addMessageToChat(errorMessage, 'ai');
+                    setStatus(errorMessage);
                 } else {
                     setStatus('Speech recognition error: ' + event.error);
                 }
@@ -394,7 +406,6 @@
             const feedbackButtons = messageElement.querySelectorAll('.feedback-button');
             const feedbackStatusSpan = messageElement.querySelector('.feedback-status');
 
-            // Disable buttons to prevent multiple submissions
             feedbackButtons.forEach(button => button.disabled = true);
 
             try {
@@ -408,19 +419,28 @@
                         query: query,
                         answer: answer,
                         feedback_type: feedbackType,
-                        timestamp: new Date().toISOString(), // Client-side timestamp
-                        source_docs: sourceDocs // Include source docs
+                        timestamp: new Date().toISOString(),
+                        source_docs: sourceDocs
                     }),
                 });
 
                 if (!response.ok) {
-                    throw new Error('Failed to submit feedback');
+                    const errorResponse = await response.json();
+                    throw new Error(errorResponse.detail || 'Failed to submit feedback due to server error.');
                 }
                 const data = await response.json();
                 console.log('Feedback submission success:', data.message);
-                feedbackStatusSpan.textContent = `Feedback: ${feedbackType === 'like' ? '👍' : '👎'} submitted!`;
 
-                // Add selected class to the clicked button
+                let feedbackEmoji = '';
+                if (feedbackType === 'like') {
+                    feedbackEmoji = '👍';
+                } else if (feedbackType === 'neutral') {
+                    feedbackEmoji = '😐';
+                } else { // 'dislike'
+                    feedbackEmoji = '👎';
+                }
+                feedbackStatusSpan.textContent = `Feedback: ${feedbackEmoji} submitted!`;
+
                 const clickedButton = Array.from(feedbackButtons).find(btn => btn.dataset.feedbackType === feedbackType);
                 if (clickedButton) {
                     clickedButton.classList.add('selected');
@@ -428,13 +448,12 @@
 
             } catch (error) {
                 console.error('Error submitting feedback:', error);
-                feedbackStatusSpan.textContent = 'Feedback failed.';
-                // Re-enable buttons if submission fails, allowing retry
+                feedbackStatusSpan.textContent = `Feedback failed: ${error.message}`;
                 feedbackButtons.forEach(button => button.disabled = false);
             }
         }
 
-        function addMessageToChat(text, sender, originalQuery = null, sourceDocuments = null) {
+        function addMessageToChat(text, sender, originalQuery = null, sourceDocuments = null, followUpQuestions = null) {
             const messageDiv = document.createElement('div');
             messageDiv.classList.add('chat-message', sender === 'user' ? 'user-message' : 'ai-message');
             messageDiv.textContent = text;
@@ -452,6 +471,14 @@
                     submitFeedback(originalQuery, text, 'like', sourceDocuments, messageDiv);
                 });
 
+                const neutralButton = document.createElement('button');
+                neutralButton.classList.add('feedback-button', 'bg-yellow-100', 'hover:bg-yellow-200', 'text-yellow-800');
+                neutralButton.innerHTML = '<i class="far fa-meh"></i> Neutral'; // Font Awesome neutral face
+                neutralButton.dataset.feedbackType = 'neutral';
+                neutralButton.addEventListener('click', () => {
+                submitFeedback(originalQuery, text, 'neutral', sourceDocuments, messageDiv);
+                });
+
                 const dislikeButton = document.createElement('button');
                 dislikeButton.classList.add('feedback-button', 'bg-red-100', 'hover:bg-red-200', 'text-red-800');
                 dislikeButton.innerHTML = '<i class="far fa-thumbs-down"></i> Not Helpful';
@@ -464,9 +491,27 @@
                 feedbackStatusSpan.classList.add('feedback-status');
 
                 feedbackContainer.appendChild(likeButton);
+                feedbackContainer.appendChild(neutralButton);
                 feedbackContainer.appendChild(dislikeButton);
                 feedbackContainer.appendChild(feedbackStatusSpan);
                 messageDiv.appendChild(feedbackContainer);
+
+                // Add Follow-up Questions
+                if (followUpQuestions && followUpQuestions.length > 0) {
+                    const followUpContainer = document.createElement('div');
+                    followUpContainer.classList.add('follow-up-questions-container');
+
+                    followUpQuestions.forEach(q => {
+                        const followUpButton = document.createElement('button');
+                        followUpButton.classList.add('follow-up-button');
+                        followUpButton.textContent = q;
+                        followUpButton.addEventListener('click', () => {
+                            sendQuery(q); // Treat follow-up as a new query
+                        });
+                        followUpContainer.appendChild(followUpButton);
+                    });
+                    messageDiv.appendChild(followUpContainer);
+                }
             }
 
             chatHistoryDiv.scrollTop = chatHistoryDiv.scrollHeight;
@@ -486,7 +531,6 @@
                 recognition.stop();
             }
 
-            // Store the query locally before sending for feedback linking
             const userQueryForFeedback = query;
             addMessageToChat(userQueryForFeedback, 'user');
             showLoading();
@@ -503,7 +547,9 @@
             if (year) {
                 filters.publication_year = year;
             }
-            console.log("Sending query with filters:", filters, "Session ID:", currentSessionId);
+
+            const filtersToSend = Object.keys(filters).length > 0 ? filters : {};
+            console.log("Sending query with filters:", filtersToSend, "Session ID:", currentSessionId);
 
             try {
                 const response = await fetch('http://127.0.0.1:8000/ask', {
@@ -513,29 +559,30 @@
                     },
                     body: JSON.stringify({
                         session_id: currentSessionId,
-                        query: userQueryForFeedback, // Send the exact query for feedback linking
-                        chat_history: chatHistory,
-                        filters: Object.keys(filters).length > 0 ? filters : null
+                        query: userQueryForFeedback,
+                        // chat_history: chatHistory, // Removed: No longer sending chat history
+                        filters: filtersToSend
                     }),
                 });
 
                 if (!response.ok) {
                     const errorData = await response.json();
-                    throw new Error(errorData.detail || 'Failed to fetch answer from API');
+                    throw new Error(errorData.detail || `Failed to fetch answer from API: ${response.status} ${response.statusText}`);
                 }
 
                 const data = await response.json();
-                // Ensure session ID is updated from backend response
                 currentSessionId = data.session_id;
                 sessionIdDisplay.textContent = currentSessionId;
 
-                addMessageToChat(data.answer, 'ai', userQueryForFeedback, data.source_documents); // Pass query and sources for feedback
-                chatHistory.push([userQueryForFeedback, data.answer]);
+                // Pass followUpQuestions to addMessageToChat
+                addMessageToChat(data.answer, 'ai', userQueryForFeedback, data.source_documents, data.follow_up_questions);
+                // chatHistory.push([userQueryForFeedback, data.answer]); // Removed: No longer maintaining chat history
 
                 speakResponse(data.answer);
 
                 if (data.source_documents && data.source_documents.length > 0) {
                     sourceDocumentsDiv.classList.remove('hidden');
+                    sourceList.innerHTML = ''; // Clear previous sources
                     data.source_documents.forEach(doc => {
                         const listItem = document.createElement('li');
                         const title = doc.metadata && doc.metadata.title ? doc.metadata.title : 'N/A';
@@ -550,8 +597,9 @@
 
             } catch (error) {
                 console.error('Error sending query:', error);
-                addMessageToChat(`Error: ${error.message}`, 'ai', userQueryForFeedback, []); // Pass empty sources on error
-                setStatus(`Error: ${error.message}`);
+                const errorMessage = `Error: ${error.message}`;
+                addMessageToChat(errorMessage, 'ai', userQueryForFeedback, [], []); // Also pass empty array for follow-ups on error
+                setStatus(errorMessage);
             } finally {
                 hideLoading();
                 queryInput.value = '';
@@ -562,11 +610,11 @@
         function getOrCreateSessionId() {
             let sessionId = localStorage.getItem('chat_session_id');
             if (!sessionId) {
-                sessionId = crypto.randomUUID(); // Generate a new UUID
+                sessionId = crypto.randomUUID();
                 localStorage.setItem('chat_session_id', sessionId);
             }
             currentSessionId = sessionId;
-            sessionIdDisplay.textContent = sessionId; // Display it in the UI
+            sessionIdDisplay.textContent = currentSessionId;
             console.log("Current Session ID:", currentSessionId);
             return sessionId;
         }
@@ -583,15 +631,14 @@
             }
         });
 
-        // Initialize filter inputs to be enabled
-        filterAuthorInput.disabled = false;
-        filterYearInput.disabled = false;
-
-        // Initialize session and display welcome message
+        // Initial setup on page load
         document.addEventListener('DOMContentLoaded', () => {
-            getOrCreateSessionId(); // Get or create session ID on load
+            localStorage.removeItem('chat_session_id'); // Clear for fresh start, but session ID still generated for feedback
+            // chatHistory = []; // Removed: No longer need to clear, as it's gone
+            getOrCreateSessionId(); // Get a fresh session ID
+
             const welcomeMessage = "Hello! Ask me anything about AI academic papers. Don't forget to give feedback!";
-            addMessageToChat(welcomeMessage, 'ai', null, null); // No query/sources for welcome
+            addMessageToChat(welcomeMessage, 'ai', null, null, []); // Pass an empty array for follow-ups for welcome message
             speakResponse(welcomeMessage);
         });
 
